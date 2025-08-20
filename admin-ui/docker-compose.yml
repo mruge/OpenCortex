@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  admin-ui:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATA_ABSTRACTOR_URL=http://data-abstractor:8080
+      - AI_ABSTRACTOR_URL=http://ai-abstractor:8081
+      - EXEC_AGENT_URL=http://exec-agent:8082
+      - ORCHESTRATOR_URL=http://orchestrator:8083
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+    networks:
+      - smart_data_abstractor_default
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # If running standalone (without main docker-compose)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - smart_data_abstractor_default
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+
+volumes:
+  redis_data:
+
+networks:
+  smart_data_abstractor_default:
+    external: true
