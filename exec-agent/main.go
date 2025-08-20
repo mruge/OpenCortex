@@ -96,21 +96,66 @@ func main() {
 	// Initialize execution handler
 	executionHandler := handlers.NewExecutionHandler(dockerClient, minioClient, serviceProxy)
 
-	// Initialize capability manager if enabled
-	var capabilityManager *capabilities.CapabilityManager
-	if cfg.Capabilities.Enabled {
-		capabilityManager = capabilities.NewCapabilityManager(
-			"exec-agent",
-			capabilities.GetExecAgentCapabilities(),
-			redisClient.GetClient(),
-			cfg.Capabilities.RefreshInterval,
+	// Initialize image scanner if enabled
+	var imageScanner *capabilities.ImageScanner
+	var enhancedCapabilities *capabilities.EnhancedExecCapabilities
+	if cfg.ImageScan.Enabled {
+		imageScanner = capabilities.NewImageScanner(
+			cfg.ImageScan.KnownImages,
+			cfg.ImageScan.ScanInterval,
 		)
+		
+		// Start periodic scanning
+		imageScanner.StartPeriodicScan(ctx)
+		
+		// Create enhanced capabilities with image scanner
+		enhancedCapabilities = capabilities.NewEnhancedExecCapabilities(imageScanner)
+		
+		logrus.WithFields(logrus.Fields{
+			"known_images":   len(cfg.ImageScan.KnownImages),
+			"scan_interval": cfg.ImageScan.ScanInterval,
+		}).Info("Image scanner initialized")
+	}
+
+	// Initialize capability manager if enabled
+	var capabilityManager interface {
+		Start(context.Context) error
+		Stop()
+	}
+	if cfg.Capabilities.Enabled {
+		if enhancedCapabilities != nil {
+			// Use dynamic capability manager that handles image changes
+			dynamicManager := capabilities.NewDynamicCapabilityManager(
+				"exec-agent",
+				enhancedCapabilities,
+				redisClient.GetClient(),
+				cfg.Capabilities.RefreshInterval,
+				cfg.ImageScan.ScanInterval,
+			)
+			capabilityManager = dynamicManager
+			
+			logrus.WithFields(logrus.Fields{
+				"image_refresh_interval": cfg.ImageScan.ScanInterval,
+				"known_images":          len(cfg.ImageScan.KnownImages),
+			}).Info("Dynamic capability manager configured with image scanning")
+		} else {
+			// Use basic capability manager
+			basicManager := capabilities.NewCapabilityManager(
+				"exec-agent",
+				capabilities.GetExecAgentCapabilities(),
+				redisClient.GetClient(),
+				cfg.Capabilities.RefreshInterval,
+			)
+			capabilityManager = basicManager
+		}
 
 		// Start capability manager
 		if err := capabilityManager.Start(ctx); err != nil {
 			logrus.WithError(err).Error("Failed to start capability manager")
 		} else {
-			logrus.Info("Capability manager started successfully")
+			logrus.WithFields(logrus.Fields{
+				"image_scanning": cfg.ImageScan.Enabled,
+			}).Info("Capability manager started successfully")
 		}
 	}
 

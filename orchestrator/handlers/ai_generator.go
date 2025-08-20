@@ -15,6 +15,7 @@ import (
 type AIWorkflowGenerator struct {
 	messageCoordinator MessageCoordinator
 	templateManager    TemplateManager
+	serviceRegistry    ServiceRegistry
 	logger            *logrus.Logger
 }
 
@@ -29,11 +30,51 @@ type TemplateManager interface {
 	GetTemplate(id string) (*models.Template, error)
 }
 
+// ServiceRegistry interface for capability management
+type ServiceRegistry interface {
+	GetAllActiveServices() map[string]*ServiceCapability
+	GetAvailableOperations() map[string][]Operation
+	IsServiceAvailable(component string) bool
+	GenerateCapabilitySummary() string
+}
+
+// ServiceCapability represents a service's announced capabilities
+type ServiceCapability struct {
+	Component    string                 `json:"component"`
+	Timestamp    string                 `json:"timestamp"`
+	Trigger      string                 `json:"trigger"`
+	Capabilities *ServiceCapabilities   `json:"capabilities"`
+}
+
+// ServiceCapabilities represents the complete capability information for a service
+type ServiceCapabilities struct {
+	Operations      []Operation      `json:"operations"`
+	MessagePatterns MessagePatterns  `json:"message_patterns"`
+}
+
+// Operation represents a single operation that a service can perform
+type Operation struct {
+	Name              string      `json:"name"`
+	Description       string      `json:"description"`
+	InputExample      interface{} `json:"input_example"`
+	OutputExample     interface{} `json:"output_example"`
+	RetrySafe         bool        `json:"retry_safe"`
+	EstimatedDuration string      `json:"estimated_duration"`
+}
+
+// MessagePatterns defines how a service communicates via Redis
+type MessagePatterns struct {
+	RequestChannel   string `json:"request_channel"`
+	ResponseChannel  string `json:"response_channel"`
+	CorrelationField string `json:"correlation_field"`
+}
+
 // NewAIWorkflowGenerator creates a new AI workflow generator
-func NewAIWorkflowGenerator(messageCoordinator MessageCoordinator, templateManager TemplateManager) *AIWorkflowGenerator {
+func NewAIWorkflowGenerator(messageCoordinator MessageCoordinator, templateManager TemplateManager, serviceRegistry ServiceRegistry) *AIWorkflowGenerator {
 	return &AIWorkflowGenerator{
 		messageCoordinator: messageCoordinator,
 		templateManager:   templateManager,
+		serviceRegistry:    serviceRegistry,
 		logger:           logrus.New(),
 	}
 }
@@ -46,6 +87,21 @@ func (ai *AIWorkflowGenerator) GenerateWorkflow(ctx context.Context, request *mo
 		"complexity":       request.Complexity,
 		"required_services": request.RequiredServices,
 	}).Info("Generating workflow with AI")
+
+	// Check service availability if required services are specified
+	if ai.serviceRegistry != nil && len(request.RequiredServices) > 0 {
+		unavailableServices := []string{}
+		for _, service := range request.RequiredServices {
+			if !ai.serviceRegistry.IsServiceAvailable(service) {
+				unavailableServices = append(unavailableServices, service)
+			}
+		}
+		
+		if len(unavailableServices) > 0 {
+			ai.logger.WithField("unavailable_services", unavailableServices).Warn("Some required services are unavailable")
+			// Continue with generation but include warning in the prompt
+		}
+	}
 
 	// Build AI prompt with context
 	prompt, err := ai.buildGenerationPrompt(request)
@@ -128,11 +184,26 @@ func (ai *AIWorkflowGenerator) buildGenerationPrompt(request *models.AIGeneratio
 		promptBuilder.WriteString(fmt.Sprintf("Required services: %s\n", strings.Join(request.RequiredServices, ", ")))
 	}
 
-	// Add available service types and their capabilities
-	promptBuilder.WriteString("\nAvailable service types:\n")
-	promptBuilder.WriteString("- data: Graph queries, vector search, data enrichment\n")
-	promptBuilder.WriteString("- ai: Text generation, analysis, classification, summarization\n")
-	promptBuilder.WriteString("- exec: Container execution, data processing, custom scripts\n")
+	// Add available services and their capabilities from registry
+	if ai.serviceRegistry != nil {
+		capabilitySummary := ai.serviceRegistry.GenerateCapabilitySummary()
+		if capabilitySummary != "" {
+			promptBuilder.WriteString("\nCurrently available services and operations:\n")
+			promptBuilder.WriteString(capabilitySummary)
+		} else {
+			// Fallback to basic descriptions if no services are available
+			promptBuilder.WriteString("\nAvailable service types (currently offline):\n")
+			promptBuilder.WriteString("- data: Graph queries, vector search, data enrichment\n")
+			promptBuilder.WriteString("- ai: Text generation, analysis, classification, summarization\n")
+			promptBuilder.WriteString("- exec: Container execution, data processing, custom scripts\n")
+		}
+	} else {
+		// Fallback if no service registry
+		promptBuilder.WriteString("\nAvailable service types:\n")
+		promptBuilder.WriteString("- data: Graph queries, vector search, data enrichment\n")
+		promptBuilder.WriteString("- ai: Text generation, analysis, classification, summarization\n")
+		promptBuilder.WriteString("- exec: Container execution, data processing, custom scripts\n")
+	}
 
 	// Add examples based on complexity
 	switch complexity {

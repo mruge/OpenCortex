@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -16,6 +17,7 @@ type Config struct {
 	ServiceProxy ServiceProxyConfig
 	App          AppConfig
 	Capabilities CapabilityConfig
+	ImageScan    ImageScanConfig
 }
 
 type RedisConfig struct {
@@ -56,6 +58,12 @@ type CapabilityConfig struct {
 	Enabled         bool
 }
 
+type ImageScanConfig struct {
+	Enabled         bool
+	ScanInterval    time.Duration
+	KnownImages     []string
+}
+
 func Load() (*Config, error) {
 	godotenv.Load()
 
@@ -92,6 +100,30 @@ func Load() (*Config, error) {
 		}
 	}
 
+	imageScanInterval := 30 * time.Minute
+	if intervalStr := os.Getenv("IMAGE_SCAN_INTERVAL"); intervalStr != "" {
+		if interval, err := time.ParseDuration(intervalStr); err == nil {
+			imageScanInterval = interval
+		}
+	}
+
+	// Parse known images from environment variable (comma-separated)
+	knownImages := []string{
+		"python:3.9-slim",
+		"node:16-alpine",
+		"tensorflow/tensorflow:latest-py3",
+		"pytorch/pytorch:latest",
+		"data-processor:latest",
+		"etl-worker:latest",
+	}
+	if imagesStr := os.Getenv("KNOWN_WORKER_IMAGES"); imagesStr != "" {
+		knownImages = strings.Split(imagesStr, ",")
+		// Trim whitespace from each image name
+		for i, img := range knownImages {
+			knownImages[i] = strings.TrimSpace(img)
+		}
+	}
+
 	config := &Config{
 		Redis: RedisConfig{
 			URL:        getEnv("REDIS_URL", "redis://localhost:6379"),
@@ -124,6 +156,11 @@ func Load() (*Config, error) {
 		Capabilities: CapabilityConfig{
 			RefreshInterval: refreshInterval,
 			Enabled:         getBoolEnv("CAPABILITY_ANNOUNCEMENTS_ENABLED", true),
+		},
+		ImageScan: ImageScanConfig{
+			Enabled:      getBoolEnv("IMAGE_SCAN_ENABLED", true),
+			ScanInterval: imageScanInterval,
+			KnownImages:  knownImages,
 		},
 	}
 

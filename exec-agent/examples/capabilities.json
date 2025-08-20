@@ -1,0 +1,65 @@
+[
+  {
+    "name": "data_processing",
+    "description": "Process CSV, JSON, and XML data files with pandas and numpy",
+    "input_example": {
+      "files": [
+        {
+          "name": "data.csv",
+          "path": "data.csv"
+        }
+      ],
+      "config_data": {
+        "operation": "transform",
+        "output_format": "json"
+      }
+    },
+    "output_example": {
+      "exit_code": 0,
+      "output": "Processed 1000 rows successfully",
+      "output_files": [
+        {
+          "name": "processed_data.json",
+          "path": "/workspace/output/processed_data.json"
+        }
+      ]
+    },
+    "retry_safe": true,
+    "estimated_duration": "30s-5m"
+  },
+  {
+    "name": "ml_training",
+    "description": "Train machine learning models using scikit-learn or custom algorithms",
+    "input_example": {
+      "files": [
+        {
+          "name": "training_data.csv",
+          "path": "training_data.csv"
+        }
+      ],
+      "config_data": {
+        "model_type": "random_forest",
+        "parameters": {
+          "n_estimators": 100,
+          "max_depth": 10
+        }
+      }
+    },
+    "output_example": {
+      "exit_code": 0,
+      "output": "Model trained with accuracy: 0.95",
+      "output_files": [
+        {
+          "name": "model.pkl",
+          "path": "/workspace/output/model.pkl"
+        },
+        {
+          "name": "metrics.json",
+          "path": "/workspace/output/metrics.json"
+        }
+      ]
+    },
+    "retry_safe": false,
+    "estimated_duration": "5m-60m"
+  }
+]

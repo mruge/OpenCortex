@@ -28,6 +28,7 @@ type OrchestratorServer struct {
 	stateManager       *clients.RedisStateManager
 	messageCoordinator *clients.RedisMessageCoordinator
 	templateManager    *handlers.TemplateManager
+	serviceRegistry    *clients.ServiceRegistry
 	aiGenerator        *handlers.AIWorkflowGenerator
 	taskExecutor       *handlers.TaskExecutorImpl
 	workflowExecutor   *engine.WorkflowExecutor
@@ -112,8 +113,11 @@ func NewOrchestratorServer(cfg *config.Config, logger *logrus.Logger) (*Orchestr
 		logger.WithError(err).Warn("Failed to load templates, continuing without templates")
 	}
 
+	// Create service registry
+	serviceRegistry := clients.NewServiceRegistry(redisClient, 0) // Use default stale threshold
+
 	// Create AI generator
-	aiGenerator := handlers.NewAIWorkflowGenerator(messageCoordinator, templateManager)
+	aiGenerator := handlers.NewAIWorkflowGenerator(messageCoordinator, templateManager, serviceRegistry)
 
 	// Create task executor
 	taskExecutor := handlers.NewTaskExecutor(messageCoordinator)
@@ -151,6 +155,7 @@ func NewOrchestratorServer(cfg *config.Config, logger *logrus.Logger) (*Orchestr
 		stateManager:       stateManager,
 		messageCoordinator: messageCoordinator,
 		templateManager:    templateManager,
+		serviceRegistry:    serviceRegistry,
 		aiGenerator:        aiGenerator,
 		taskExecutor:       taskExecutor,
 		workflowExecutor:   workflowExecutor,
@@ -165,6 +170,15 @@ func (s *OrchestratorServer) Start() error {
 	if s.config.Orchestrator.RecoveryEnabled {
 		s.recoveryManager.Start(context.Background())
 		defer s.recoveryManager.Stop()
+	}
+
+	// Start service registry
+	if s.serviceRegistry != nil {
+		if err := s.serviceRegistry.Start(context.Background()); err != nil {
+			s.logger.WithError(err).Error("Failed to start service registry")
+		} else {
+			s.logger.Info("Service registry started successfully")
+		}
 	}
 
 	// Start capability manager if enabled
@@ -216,6 +230,12 @@ func (s *OrchestratorServer) Start() error {
 	if s.capabilityManager != nil {
 		s.capabilityManager.Stop()
 		s.logger.Info("Capability manager stopped")
+	}
+
+	// Stop service registry if running
+	if s.serviceRegistry != nil {
+		s.serviceRegistry.Stop()
+		s.logger.Info("Service registry stopped")
 	}
 
 	// Close Redis connection
