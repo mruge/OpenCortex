@@ -1,0 +1,209 @@
+id: data-analysis-basic
+name: Basic Data Analysis Workflow
+description: Perform graph traversal, vector search, and AI-powered analysis
+category: data-science
+version: "1.0"
+variables:
+  - name: query_limit
+    type: int
+    description: Maximum number of results to return
+    required: true
+    default: 100
+  - name: search_embedding
+    type: array
+    description: Vector for similarity search
+    required: false
+  - name: analysis_prompt
+    type: string
+    description: Custom prompt for AI analysis
+    required: false
+    default: "Analyze the following data and identify key patterns"
+
+workflow:
+  id: data-analysis-workflow
+  name: Data Analysis Workflow
+  description: Comprehensive data analysis combining graph, vector, and AI capabilities
+  timeout: 1800
+  variables:
+    query_limit: ${query_limit}
+    search_embedding: ${search_embedding}
+    analysis_prompt: ${analysis_prompt}
+  
+  tasks:
+    - id: graph_traversal
+      name: Graph Data Traversal
+      type: data
+      parameters:
+        operation: traverse
+        query:
+          cypher: "MATCH (n)-[r]-(m) RETURN n, r, m LIMIT ${query_limit}"
+        enrich: ["metadata"]
+        limit: ${query_limit}
+      retry_policy:
+        max_retries: 2
+        backoff_type: exponential
+        initial_delay: 1s
+      timeout: 60
+      
+    - id: vector_search
+      name: Vector Similarity Search
+      type: data
+      parameters:
+        operation: search
+        query:
+          embedding: ${search_embedding}
+        enrich: ["metadata"]
+        limit: ${query_limit}
+      retry_policy:
+        max_retries: 2
+        backoff_type: exponential
+        initial_delay: 1s
+      timeout: 60
+      condition: "${search_embedding != null}"
+      
+    - id: combine_data
+      name: Combine Graph and Vector Results
+      type: exec
+      depends_on: ["graph_traversal", "vector_search"]
+      parameters:
+        image: "python:3.9-slim"
+        command: ["python", "/workspace/input/combine_data.py"]
+      files:
+        - name: combine_data.py
+          content: |
+            import json
+            import os
+            
+            # Load graph data
+            graph_file = "/workspace/input/graph_traversal_output.json"
+            if os.path.exists(graph_file):
+                with open(graph_file, 'r') as f:
+                    graph_data = json.load(f)
+            else:
+                graph_data = {"nodes": [], "relationships": []}
+            
+            # Load vector data if available
+            vector_file = "/workspace/input/vector_search_output.json"
+            vector_data = {"nodes": []}
+            if os.path.exists(vector_file):
+                with open(vector_file, 'r') as f:
+                    vector_data = json.load(f)
+            
+            # Combine data
+            combined = {
+                "graph_nodes": graph_data.get("nodes", []),
+                "graph_relationships": graph_data.get("relationships", []),
+                "vector_nodes": vector_data.get("nodes", []),
+                "total_graph_nodes": len(graph_data.get("nodes", [])),
+                "total_vector_nodes": len(vector_data.get("nodes", [])),
+                "combined_timestamp": "2024-01-01T00:00:00Z"
+            }
+            
+            # Save combined data
+            with open("/workspace/output/combined_data.json", 'w') as f:
+                json.dump(combined, f, indent=2)
+            
+            print(f"Combined {len(combined['graph_nodes'])} graph nodes and {len(combined['vector_nodes'])} vector nodes")
+      timeout: 120
+      
+    - id: ai_analysis
+      name: AI-Powered Data Analysis
+      type: ai
+      depends_on: ["combine_data"]
+      parameters:
+        provider: anthropic
+        prompt: "${analysis_prompt}. Data summary: ${combine_data.output.summary}"
+        context: ["Combined data from graph traversal and vector search"]
+        response_format: json
+        model: claude-3-sonnet
+        max_tokens: 2000
+        temperature: 0.3
+      retry_policy:
+        max_retries: 3
+        backoff_type: exponential
+        initial_delay: 2s
+      timeout: 120
+      
+    - id: generate_report
+      name: Generate Analysis Report
+      type: exec
+      depends_on: ["ai_analysis"]
+      parameters:
+        image: "python:3.9-slim"
+        command: ["python", "/workspace/input/generate_report.py"]
+      files:
+        - name: generate_report.py
+          content: |
+            import json
+            import os
+            from datetime import datetime
+            
+            # Load AI analysis
+            ai_file = "/workspace/input/ai_analysis_output.json"
+            if os.path.exists(ai_file):
+                with open(ai_file, 'r') as f:
+                    ai_analysis = json.load(f)
+            else:
+                ai_analysis = {"content": "No analysis available"}
+            
+            # Load combined data
+            data_file = "/workspace/input/combined_data.json"
+            if os.path.exists(data_file):
+                with open(data_file, 'r') as f:
+                    combined_data = json.load(f)
+            else:
+                combined_data = {}
+            
+            # Generate report
+            report = {
+                "title": "Data Analysis Report",
+                "generated_at": datetime.now().isoformat(),
+                "summary": {
+                    "total_graph_nodes": combined_data.get("total_graph_nodes", 0),
+                    "total_vector_nodes": combined_data.get("total_vector_nodes", 0),
+                    "analysis_provider": "anthropic"
+                },
+                "ai_insights": ai_analysis.get("content", ""),
+                "data_quality": {
+                    "graph_data_available": len(combined_data.get("graph_nodes", [])) > 0,
+                    "vector_data_available": len(combined_data.get("vector_nodes", [])) > 0
+                },
+                "recommendations": [
+                    "Review data quality metrics",
+                    "Consider expanding query parameters",
+                    "Validate AI insights with domain expertise"
+                ]
+            }
+            
+            # Save report
+            with open("/workspace/output/analysis_report.json", 'w') as f:
+                json.dump(report, f, indent=2)
+            
+            # Save markdown version
+            markdown_report = f"""# Data Analysis Report
+
+## Summary
+- Graph Nodes: {report['summary']['total_graph_nodes']}
+- Vector Nodes: {report['summary']['total_vector_nodes']}
+- Generated: {report['generated_at']}
+
+## AI Insights
+{report['ai_insights']}
+
+## Data Quality
+- Graph Data Available: {report['data_quality']['graph_data_available']}
+- Vector Data Available: {report['data_quality']['vector_data_available']}
+
+## Recommendations
+{chr(10).join(f"- {rec}" for rec in report['recommendations'])}
+"""
+            
+            with open("/workspace/output/report.md", 'w') as f:
+                f.write(markdown_report)
+            
+            print("Analysis report generated successfully")
+      timeout: 60
+      
+  on_error:
+    strategy: continue
+    notify: "admin@example.com"

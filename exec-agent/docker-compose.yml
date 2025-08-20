@@ -1,0 +1,51 @@
+services:
+  exec-agent:
+    build: .
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - EXEC_REQUEST_CHANNEL=exec-requests
+      - EXEC_RESPONSE_CHANNEL=exec-responses
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - DOCKER_NETWORK=smart_data_abstractor_default
+      - EXEC_WORK_DIR=/tmp/exec-agent
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_BUCKET=exec-data
+      - DATA_ABSTRACTOR_URL=http://data-abstractor:8080
+      - AI_ABSTRACTOR_URL=http://ai-abstractor:8081
+      - SERVICE_PROXY_PORT=9000
+      - LOG_LEVEL=info
+    ports:
+      - "8082:8082"
+      - "9000:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - exec_workspace:/tmp/exec-agent
+    depends_on:
+      - redis
+      - minio
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+
+volumes:
+  minio_data:
+  exec_workspace:

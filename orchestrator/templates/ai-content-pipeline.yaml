@@ -1,0 +1,276 @@
+id: ai-content-pipeline
+name: AI Content Generation Pipeline
+description: Multi-stage AI content creation with review and optimization
+category: content-generation
+version: "1.0"
+variables:
+  - name: content_topic
+    type: string
+    description: Main topic for content generation
+    required: true
+  - name: target_audience
+    type: string
+    description: Target audience for the content
+    required: false
+    default: "general audience"
+  - name: content_length
+    type: string
+    description: Desired content length
+    required: false
+    default: "medium"
+    options: ["short", "medium", "long"]
+  - name: content_format
+    type: string
+    description: Output format for content
+    required: false
+    default: "markdown"
+    options: ["markdown", "html", "json", "yaml"]
+
+workflow:
+  id: ai-content-pipeline-workflow
+  name: AI Content Generation Pipeline
+  description: Comprehensive AI-driven content creation workflow
+  timeout: 2400
+  variables:
+    content_topic: ${content_topic}
+    target_audience: ${target_audience}
+    content_length: ${content_length}
+    content_format: ${content_format}
+    
+  tasks:
+    - id: research_phase
+      name: Content Research and Planning
+      type: ai
+      parameters:
+        provider: anthropic
+        prompt: "Research and create a comprehensive content plan for: ${content_topic}. Target audience: ${target_audience}. Length: ${content_length}. Include key points, structure, and relevant subtopics."
+        system_message: "You are a content strategist and researcher. Create detailed content plans based on user requirements."
+        response_format: json
+        model: claude-3-sonnet
+        max_tokens: 2000
+        temperature: 0.4
+      retry_policy:
+        max_retries: 3
+        backoff_type: exponential
+        initial_delay: 2s
+      timeout: 120
+      
+    - id: outline_creation
+      name: Create Content Outline
+      type: ai
+      depends_on: ["research_phase"]
+      parameters:
+        provider: openai
+        prompt: "Based on this research: ${research_phase.output.content}, create a detailed outline for content about ${content_topic}. Format as a structured hierarchy."
+        response_format: json
+        model: gpt-4
+        max_tokens: 1500
+        temperature: 0.3
+      retry_policy:
+        max_retries: 2
+        backoff_type: linear
+        initial_delay: 3s
+      timeout: 90
+      
+    - id: content_generation
+      name: Generate Main Content
+      type: ai
+      depends_on: ["outline_creation"]
+      parameters:
+        provider: anthropic
+        prompt: "Write comprehensive content following this outline: ${outline_creation.output.content}. Topic: ${content_topic}. Audience: ${target_audience}. Length: ${content_length}. Make it engaging and informative."
+        system_message: "You are an expert content writer. Create high-quality, engaging content that matches the target audience and requirements."
+        response_format: ${content_format}
+        model: claude-3-opus
+        max_tokens: 4000
+        temperature: 0.6
+      retry_policy:
+        max_retries: 3
+        backoff_type: exponential
+        initial_delay: 2s
+      timeout: 180
+      
+    - id: content_review
+      name: Content Quality Review
+      type: ai
+      depends_on: ["content_generation"]
+      parameters:
+        provider: openai
+        prompt: "Review this content for quality, accuracy, engagement, and adherence to requirements. Content: ${content_generation.output.content}. Provide specific feedback and a quality score."
+        system_message: "You are a professional content editor and quality reviewer. Provide constructive feedback and suggestions for improvement."
+        response_format: json
+        model: gpt-4
+        max_tokens: 1000
+        temperature: 0.2
+      timeout: 90
+      
+    - id: seo_optimization
+      name: SEO Analysis and Optimization
+      type: ai
+      depends_on: ["content_generation"]
+      parameters:
+        provider: anthropic
+        prompt: "Analyze this content for SEO optimization opportunities. Content: ${content_generation.output.content}. Topic: ${content_topic}. Suggest keywords, meta descriptions, and improvements."
+        system_message: "You are an SEO expert. Analyze content for search engine optimization and provide actionable recommendations."
+        response_format: json
+        model: claude-3-sonnet
+        max_tokens: 1200
+        temperature: 0.3
+      timeout: 90
+      
+    - id: content_refinement
+      name: Refine Content Based on Review
+      type: ai
+      depends_on: ["content_generation", "content_review", "seo_optimization"]
+      parameters:
+        provider: anthropic
+        prompt: "Improve this content based on the review feedback and SEO recommendations. Original: ${content_generation.output.content}. Review: ${content_review.output.content}. SEO: ${seo_optimization.output.content}"
+        system_message: "You are an expert content editor. Refine content based on feedback while maintaining quality and readability."
+        response_format: ${content_format}
+        model: claude-3-opus
+        max_tokens: 4000
+        temperature: 0.4
+      retry_policy:
+        max_retries: 2
+        backoff_type: exponential
+        initial_delay: 3s
+      timeout: 150
+      
+    - id: generate_metadata
+      name: Generate Content Metadata
+      type: ai
+      depends_on: ["content_refinement", "seo_optimization"]
+      parameters:
+        provider: openai
+        prompt: "Generate comprehensive metadata for this content including title, description, keywords, tags, and publishing recommendations. Content: ${content_refinement.output.content}"
+        response_format: json
+        model: gpt-4
+        max_tokens: 800
+        temperature: 0.2
+      timeout: 60
+      
+    - id: package_content
+      name: Package Final Content
+      type: exec
+      depends_on: ["content_refinement", "generate_metadata", "content_review"]
+      parameters:
+        image: "python:3.9-slim"
+        command: ["python", "/workspace/input/package_content.py"]
+      files:
+        - name: package_content.py
+          content: |
+            import json
+            import os
+            from datetime import datetime
+            
+            # Load all components
+            def load_json_file(filename):
+                filepath = f"/workspace/input/{filename}"
+                if os.path.exists(filepath):
+                    with open(filepath, 'r') as f:
+                        return json.load(f)
+                return {}
+            
+            content_data = load_json_file("content_refinement_output.json")
+            metadata = load_json_file("generate_metadata_output.json")
+            review = load_json_file("content_review_output.json")
+            seo = load_json_file("seo_optimization_output.json")
+            
+            # Package everything together
+            final_package = {
+                "content": {
+                    "title": metadata.get("title", "Generated Content"),
+                    "body": content_data.get("content", ""),
+                    "format": "${content_format}",
+                    "topic": "${content_topic}",
+                    "audience": "${target_audience}",
+                    "length": "${content_length}"
+                },
+                "metadata": {
+                    "description": metadata.get("description", ""),
+                    "keywords": metadata.get("keywords", []),
+                    "tags": metadata.get("tags", []),
+                    "created_at": datetime.now().isoformat(),
+                    "word_count": len(content_data.get("content", "").split())
+                },
+                "quality_metrics": {
+                    "review_score": review.get("quality_score", 0),
+                    "seo_score": seo.get("seo_score", 0),
+                    "feedback_summary": review.get("summary", ""),
+                    "seo_recommendations": seo.get("recommendations", [])
+                },
+                "publishing": {
+                    "ready_for_publish": review.get("quality_score", 0) >= 7,
+                    "recommended_channels": metadata.get("channels", []),
+                    "best_publish_time": metadata.get("publish_time", ""),
+                    "follow_up_actions": [
+                        "Review final content",
+                        "Implement SEO recommendations",
+                        "Schedule social media posts",
+                        "Monitor engagement metrics"
+                    ]
+                }
+            }
+            
+            # Save final package
+            with open("/workspace/output/content_package.json", 'w') as f:
+                json.dump(final_package, f, indent=2)
+            
+            # Save content in requested format
+            content_filename = f"final_content.{final_package['content']['format']}"
+            with open(f"/workspace/output/{content_filename}", 'w') as f:
+                f.write(final_package['content']['body'])
+            
+            # Generate summary report
+            summary = {
+                "workflow_completed": True,
+                "content_topic": final_package['content']['topic'],
+                "word_count": final_package['metadata']['word_count'],
+                "quality_score": final_package['quality_metrics']['review_score'],
+                "seo_score": final_package['quality_metrics']['seo_score'],
+                "ready_for_publish": final_package['publishing']['ready_for_publish'],
+                "files_generated": [
+                    "content_package.json",
+                    content_filename
+                ]
+            }
+            
+            with open("/workspace/output/workflow_summary.json", 'w') as f:
+                json.dump(summary, f, indent=2)
+            
+            print(f"Content pipeline completed successfully!")
+            print(f"Topic: {summary['content_topic']}")
+            print(f"Word count: {summary['word_count']}")
+            print(f"Quality score: {summary['quality_score']}/10")
+            print(f"SEO score: {summary['seo_score']}/10")
+            print(f"Ready for publish: {summary['ready_for_publish']}")
+      timeout: 120
+      
+    - id: quality_gate
+      name: Final Quality Gate
+      type: condition
+      depends_on: ["package_content"]
+      condition: "${package_content.output.quality_score >= 7}"
+      on_success: ["publish_ready"]
+      on_failure: ["quality_improvement"]
+      
+    - id: publish_ready
+      name: Mark Content as Publish Ready
+      type: exec
+      parameters:
+        image: "alpine:latest"
+        command: ["sh", "-c", "echo 'Content passed quality gate and is ready for publishing' > /workspace/output/publish_status.txt"]
+      timeout: 30
+      
+    - id: quality_improvement
+      name: Flag for Quality Improvement
+      type: exec
+      parameters:
+        image: "alpine:latest"
+        command: ["sh", "-c", "echo 'Content requires quality improvements before publishing' > /workspace/output/improvement_needed.txt"]
+      timeout: 30
+      
+  on_error:
+    strategy: continue
+    max_retries: 1
+    notify: "content-team@example.com"

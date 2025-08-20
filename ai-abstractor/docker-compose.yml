@@ -1,0 +1,27 @@
+services:
+  ai-abstractor:
+    build: .
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - AI_REQUEST_CHANNEL=ai-requests
+      - AI_RESPONSE_CHANNEL=ai-responses
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=gpt-4
+      - OPENAI_MAX_TOKENS=4000
+      - OPENAI_TEMPERATURE=0.7
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_MODEL=claude-3-sonnet-20240229
+      - ANTHROPIC_MAX_TOKENS=4000
+      - LOG_LEVEL=info
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+volumes:
+  redis_data:
